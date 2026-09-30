@@ -18,7 +18,7 @@
         DISPLAY_SIZE: 5,
 
         MIN_PRICE: 200,
-        STOP_PRICE: 50,
+        STOP_PRICE: 100,
 
         NORMAL_DELAY_MS: 1500,
         EMPTY_DELAY_MS: 500,
@@ -678,11 +678,9 @@
     // OPEN BUY FLOW
     // =========================
     //
-    // Opens the exact Steam search
-    // that produced the cheap listing.
-    //
-    // Final Steam purchase confirmation
-    // remains manual.
+    // Navigates to Steam search, applies filters,
+    // searches for games watched, clicks first matching listing.
+    // Stops at the purchase modal (does not confirm purchase).
     //
 
     async function openBuyFlow(
@@ -693,7 +691,7 @@
         console.log("");
 
         console.log(
-            "🛒 Preparing Buy flow..."
+            "🛒 Starting Buy flow..."
         );
 
         console.log(
@@ -704,79 +702,52 @@
             `🎮 Games watched: ${gamesWatched}`
         );
 
-
-        const url =
+        const searchUrl =
             "https://steamcommunity.com/market/search" +
             "?category_Type=socket_gem" +
             "&appid=570" +
             `&q=games+watched%3A+${gamesWatched}` +
             "&descriptions=1";
 
-
         try {
 
-            const buyWindow =
-                window.open(
-                    url,
-                    "_blank"
-                );
+            console.log("🌐 Navigating to Steam search...");
 
+            // Navigate current tab to search URL
+            window.location.href = searchUrl;
 
-            if (!buyWindow) {
+            // Wait for page to load and results to appear
+            await waitForSearchResults();
 
+            console.log("✅ Search results loaded");
+
+            // Find and click the first listing matching target price
+            const buyButton = findBuyButtonByPrice(targetPrice);
+
+            if (!buyButton) {
                 console.error(
-                    "❌ Steam tab could not be opened. " +
-                    "Allow pop-ups for Steam."
+                    `❌ No listing found at ₱${targetPrice.toFixed(2)}`
                 );
-
+                console.log(
+                    "👉 You may need to manually select the correct listing."
+                );
                 return;
             }
 
+            console.log(
+                `✅ Found listing at ₱${targetPrice.toFixed(2)} — clicking Buy...`
+            );
+
+            buyButton.click();
+
+            // Wait for purchase confirmation modal to appear
+            await waitForModal("Purchase confirmation", () => findModalBuyButton());
+
+            console.log("🛒 Purchase modal opened. Ready for manual confirmation.");
 
             console.log(
-                "🌐 Steam Buy flow opened."
+                "⚠️ Complete the purchase manually in the Steam dialog."
             );
-
-
-            console.log(
-                "⏳ Waiting for Steam page..."
-            );
-
-
-            // Give Steam time to load
-            await new Promise(
-                resolve =>
-                    setTimeout(
-                        resolve,
-                        2500
-                    )
-            );
-
-
-            /*
-             * The new tab is a separate
-             * browser window.
-             *
-             * The scanner cannot safely
-             * access its DOM after navigation.
-             *
-             * Therefore, the final Buy
-             * selection remains manual.
-             */
-
-
-            console.log(
-                "ℹ️ Steam search opened."
-            );
-
-
-            console.log(
-                "👉 Select the ₱" +
-                targetPrice.toFixed(2) +
-                " Buy button if Steam did not " +
-                "open the purchase dialog automatically."
-            );
-
 
         } catch (error) {
 
@@ -787,6 +758,170 @@
 
         }
 
+    }
+
+
+    // =========================
+    // BUY FLOW HELPERS
+    // =========================
+
+    function findBuyButtonByPrice(
+        targetPrice
+    ) {
+
+        const buttons = [
+            ...document.querySelectorAll("button")
+        ].filter(
+            btn =>
+                btn.innerText.trim() === "Buy"
+        );
+
+        for (const btn of buttons) {
+
+            const container = btn.parentElement;
+            if (!container) continue;
+
+            const priceSpan = [
+                ...container.querySelectorAll("span")
+            ].find(span =>
+                /₱\s*[\d,]+(?:\.\d{1,2})?/.test(
+                    span.innerText
+                )
+            );
+
+            if (!priceSpan) continue;
+
+            const match = priceSpan.innerText.match(
+                /₱\s*([\d,]+(?:\.\d{1,2})?)/
+            );
+            if (!match) continue;
+
+            const price = parseFloat(
+                match[1].replace(/,/g, "")
+            );
+
+            if (
+                Number.isFinite(price) &&
+                Math.abs(price - targetPrice) < 0.01
+            ) {
+                return btn;
+            }
+
+        }
+
+        return null;
+    }
+
+
+    function findModalBuyButton() {
+
+        // First modal: button with text "Buy" or "Continue"
+        // Often inside a modal dialog with class containing "modal" or "dialog"
+        const modals = document.querySelectorAll(
+            '[class*="modal"], [class*="dialog"], [role="dialog"]'
+        );
+
+        for (const modal of modals) {
+
+            const btn = [
+                ...modal.querySelectorAll("button")
+            ].find(
+                b =>
+                    /^(Buy|Continue|Confirm)$/i.test(
+                        b.innerText.trim()
+                    )
+            );
+            if (btn) return btn;
+        }
+
+        // Fallback: any visible "Buy" button not on main listing row
+        return [
+            ...document.querySelectorAll("button")
+        ].find(
+            b =>
+                /^Buy$/i.test(b.innerText.trim()) &&
+                !b.closest(".market_listing_row, .market_listing, [class*='listing']")
+        );
+
+    }
+
+
+    function waitForSearchResults() {
+
+        return new Promise(resolve => {
+
+            const start = Date.now();
+            const timeout = 2000; // 2s - reduced from 15s
+
+            function check() {
+
+                // Check if search results table/rows exist
+                const hasResults =
+                    document.querySelector("#searchResultsRows") ||
+                    document.querySelector("[id*='searchResults']") ||
+                    document.querySelector(".market_listing_row") ||
+                    document.querySelector("[class*='market_listing']");
+
+                if (hasResults) {
+                    // Small delay to let all listings render
+                    setTimeout(resolve, 300);
+                    return;
+                }
+
+                // Check for "no results" message
+                const noResults = document.querySelector(".market_noresults, [class*='no_results']");
+                if (noResults) {
+                    console.log("ℹ️ No results found for this search");
+                    resolve();
+                    return;
+                }
+
+                if (Date.now() - start > timeout) {
+                    console.error("⏱️ Timeout waiting for search results");
+                    resolve();
+                    return;
+                }
+
+                requestAnimationFrame(check);
+            }
+
+            check();
+
+        });
+    }
+
+
+    function waitForModal(
+        label,
+        finder
+    ) {
+
+        return new Promise(resolve => {
+
+            const start = Date.now();
+            const timeout = 2000; // 2s - reduced from 15s
+
+            function check() {
+
+                if (finder()) {
+                    resolve();
+                    return;
+                }
+
+                if (Date.now() - start > timeout) {
+                    console.error(
+                        `⏱️ Timeout waiting for ${label}`
+                    );
+                    resolve();
+                    return;
+                }
+
+                requestAnimationFrame(check);
+            }
+
+            check();
+
+        });
     }
 
 

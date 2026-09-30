@@ -18,7 +18,7 @@
         DISPLAY_SIZE: 5,
 
         MIN_PRICE: 200,
-        STOP_PRICE: 100,
+        STOP_PRICE: 50,
 
         NORMAL_DELAY_MS: 1500,
         EMPTY_DELAY_MS: 500,
