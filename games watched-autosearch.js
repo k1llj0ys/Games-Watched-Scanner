@@ -20,7 +20,7 @@
         MIN_PRICE: 200,
         STOP_PRICE: 100,
 
-        NORMAL_DELAY_MS: 1500,
+        NORMAL_DELAY_MS: 1000,
         EMPTY_DELAY_MS: 500,
         ERROR_DELAY_MS: 5000,
 
@@ -851,7 +851,7 @@
         return new Promise(resolve => {
 
             const start = Date.now();
-            const timeout = 2000; // 2s - reduced from 15s
+            const timeout = 5000; // 5s - reduced from 15s
 
             function check() {
 
@@ -899,7 +899,7 @@
         return new Promise(resolve => {
 
             const start = Date.now();
-            const timeout = 2000; // 2s - reduced from 15s
+            const timeout = 5000; // 5s - reduced from 15s
 
             function check() {
 
