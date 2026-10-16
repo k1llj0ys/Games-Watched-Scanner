@@ -18,13 +18,11 @@
         DISPLAY_SIZE: 5,
 
         MIN_PRICE: 200,
-        STOP_PRICE: 100,
+        STOP_PRICE: 45,
 
-        NORMAL_DELAY_MS: 1000,
+        NORMAL_DELAY_MS: 1500,
         EMPTY_DELAY_MS: 500,
         ERROR_DELAY_MS: 5000,
-
-        VERBOSE_LOGGING: false,
 
         RETRY_DELAY_MS: 5000,
         MAX_RETRIES: 3
@@ -153,6 +151,36 @@
 
 
     // =========================
+    // PARSE PRICE FROM ELEMENT
+    // =========================
+
+    function parsePriceFromElement(element) {
+
+        const match =
+            element.innerText.match(
+                /₱\s*([\d,]+(?:\.\d{1,2})?)/
+            );
+
+        if (!match) {
+            return null;
+        }
+
+        const price =
+            parseFloat(
+                match[1].replace(/,/g, "")
+            );
+
+        return (
+            Number.isFinite(price) &&
+            price > 0
+        )
+            ? price
+            : null;
+
+    }
+
+
+    // =========================
     // EXTRACT LISTINGS
     // =========================
 
@@ -194,31 +222,14 @@
             if (!priceElement) return;
 
 
-            const match =
-                priceElement.innerText.match(
-                    /₱\s*([\d,]+(?:\.\d{1,2})?)/
-                );
+            const price = parsePriceFromElement(priceElement);
+
+            if (!price) return;
 
 
-            if (!match) return;
-
-
-            const price =
-                parseFloat(
-                    match[1].replace(/,/g, "")
-                );
-
-
-            if (
-                Number.isFinite(price) &&
-                price > 0
-            ) {
-
-                listings.push({
-                    price
-                });
-
-            }
+            listings.push({
+                price
+            });
 
         });
 
@@ -292,7 +303,7 @@
                         gamesWatched,
 
                         timestamp:
-                            Date.now() * 1000 + index,
+                            Date.now() + index,
 
                         _newBatch: true
                     })
@@ -411,10 +422,13 @@
 
 
     // =========================
-    // GROUP BY PRICE
+    // GROUP LISTINGS BY PRICE
     // =========================
 
-    function groupByPrice(listings) {
+    function groupListingsByPrice(
+        listings,
+        trackRank = false
+    ) {
 
         const groups =
             new Map();
@@ -436,17 +450,32 @@
                     count: 0,
 
                     gamesWatched:
-                        item.gamesWatched
+                        item.gamesWatched,
+
+                    ...(trackRank && { bestRank: Infinity })
 
                 });
 
             }
 
 
-            groups.get(priceKey).count++;
+            const g =
+                groups.get(priceKey);
 
+            g.count++;
+
+            if (trackRank) {
+
+                const rank =
+                    item._rank ||
+                    Infinity;
+
+                if (rank < g.bestRank) {
+                    g.bestRank = rank;
+                }
+
+            }
         });
-
 
         return [
             ...groups.values()
@@ -489,66 +518,6 @@
 
 
     // =========================
-    // GROUP NEW ENTRIES WITH RANK
-    // =========================
-
-    function groupNewEntriesByPrice(
-        entries
-    ) {
-
-        const groups =
-            new Map();
-
-        entries.forEach(item => {
-
-            const priceKey =
-                Number(item.price).toFixed(2);
-
-            if (!groups.has(priceKey)) {
-
-                groups.set(priceKey, {
-
-                    price:
-                        Number(priceKey),
-
-                    count: 0,
-
-                    gamesWatched:
-                        item.gamesWatched,
-
-                    bestRank:
-                        item._rank ||
-                        Infinity
-
-                });
-
-            }
-
-            const g =
-                groups.get(priceKey);
-
-            g.count++;
-
-            if (
-                (item._rank || Infinity) <
-                g.bestRank
-            ) {
-                g.bestRank = item._rank;
-            }
-
-        });
-
-        return [
-            ...groups.values()
-        ].sort(
-            (a, b) =>
-                a.price - b.price
-        );
-
-    }
-
-
-    // =========================
     // DISPLAY NEW ENTRIES
     // =========================
 
@@ -563,8 +532,9 @@
 
 
         const groups =
-            groupNewEntriesByPrice(
-                newEntries
+            groupListingsByPrice(
+                newEntries,
+                true
             );
 
 
@@ -635,7 +605,7 @@
 
 
         const groups =
-            groupByPrice(
+            groupListingsByPrice(
                 tracker
             );
 
@@ -675,6 +645,25 @@
 
 
     // =========================
+    // BUILD STEAM SEARCH URL
+    // =========================
+
+    function buildSteamSearchUrl(
+        gamesWatched
+    ) {
+
+        return (
+            "https://steamcommunity.com/market/search" +
+            "?category_Type=socket_gem" +
+            "&appid=570" +
+            `&q=games+watched%3A+${gamesWatched}` +
+            "&descriptions=1"
+        );
+
+    }
+
+
+    // =========================
     // OPEN BUY FLOW
     // =========================
     //
@@ -688,6 +677,10 @@
         targetPrice
     ) {
 
+        // NOTE: window.location.href navigates away from the current page,
+        // which unloads this script. The buy flow continues only if this
+        // script is reinjected on the Steam market search page. Otherwise,
+        // treat this as a manual buy: open the URL below and complete purchase.
         console.log("");
 
         console.log(
@@ -703,11 +696,7 @@
         );
 
         const searchUrl =
-            "https://steamcommunity.com/market/search" +
-            "?category_Type=socket_gem" +
-            "&appid=570" +
-            `&q=games+watched%3A+${gamesWatched}` +
-            "&descriptions=1";
+            buildSteamSearchUrl(gamesWatched);
 
         try {
 
@@ -791,17 +780,10 @@
 
             if (!priceSpan) continue;
 
-            const match = priceSpan.innerText.match(
-                /₱\s*([\d,]+(?:\.\d{1,2})?)/
-            );
-            if (!match) continue;
-
-            const price = parseFloat(
-                match[1].replace(/,/g, "")
-            );
+            const price = parsePriceFromElement(priceSpan);
 
             if (
-                Number.isFinite(price) &&
+                price &&
                 Math.abs(price - targetPrice) < 0.01
             ) {
                 return btn;
@@ -935,11 +917,7 @@
     ) {
 
         const url =
-            "https://steamcommunity.com/market/search" +
-            "?category_Type=socket_gem" +
-            "&appid=570" +
-            `&q=games+watched%3A+${gamesWatched}` +
-            "&descriptions=1";
+            buildSteamSearchUrl(gamesWatched);
 
 
         console.log("");
@@ -1084,7 +1062,7 @@
                 ) {
 
                     const priceGroups =
-                        groupByPrice(
+                        groupListingsByPrice(
                             cheapListings
                         );
 
@@ -1345,6 +1323,49 @@
 
 
     // =========================
+    // DELAY WITH ABORT SUPPORT
+    // =========================
+
+    function delayWithAbort(
+        ms,
+        signal
+    ) {
+
+        return new Promise(
+            (resolve, reject) => {
+
+                const timer =
+                    setTimeout(
+                        resolve,
+                        ms
+                    );
+
+                const abort = () => {
+
+                    clearTimeout(timer);
+
+                    reject(
+                        new DOMException(
+                            "Aborted",
+                            "AbortError"
+                        )
+                    );
+
+                };
+
+                signal.addEventListener(
+                    "abort",
+                    abort,
+                    { once: true }
+                );
+
+            }
+        );
+
+    }
+
+
+    // =========================
     // MAIN LOOP
     // =========================
 
@@ -1514,13 +1535,20 @@
             }
 
 
-            await new Promise(
-                resolve =>
-                    setTimeout(
-                        resolve,
-                        delay
-                    )
-            );
+            try {
+
+                await delayWithAbort(
+                    delay,
+                    signal
+                );
+
+            } catch {
+
+                // Scanner was stopped during delay
+
+                break;
+
+            }
 
         }
 
